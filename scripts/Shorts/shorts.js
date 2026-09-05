@@ -96,26 +96,15 @@ function getShortIdFromUrl() {
   return new URLSearchParams(window.location.search).get('shortId');
 }
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (character) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-  }[character]));
-}
-
 function renderShorts(shorts) {
   shortsFeed = Array.isArray(shorts) ? shorts : [];
   const container = document.querySelector('.short-video');
   container.innerHTML = shortsFeed.map(short => `
     <div class="shorts-video-container" data-short-id="${short.shortId}" data-channel-id="${short.channelId}">
       <div class="shorts-video-wrapper">
-        <video class="shorts-video" width="400" preload="none" poster="${escapeHtml(short.thumbnail)}" data-video-src="${escapeHtml(short.videoUrl)}" playsinline></video>
-        <div class="shorts-loading-indicator" role="status" aria-label="Loading video" aria-hidden="true">
-          <span class="shorts-loading-spinner"></span>
-        </div>
+        <video class="shorts-video" width="400">
+          <source src="${short.videoUrl}" type="video/mp4">
+        </video>
         <div class="shorts-progress">
           <div class="shorts-progress-track"><div class="shorts-progress-fill"></div></div>
         </div>
@@ -168,28 +157,17 @@ function truncateProTitles() {
 
 function playShortAt(index) {
   const containers = document.querySelectorAll('.shorts-video-container');
-  const activeContainer = containers[index];
-  const activeVideo = activeContainer?.querySelector('.shorts-video');
-  if (!activeVideo) return;
-
-  const requestId = ++playbackRequestId;
-  const loadPromise = loadShortVideo(activeVideo);
-
   containers.forEach((container, i) => {
     const v = container.querySelector('.shorts-video');
     const p = container.querySelector('.js-play');
     if (!v) return;
     const volBtn = container.querySelector('.js-volume');
     if (i === index) {
-      loadPromise.then(() => {
-        if (requestId !== playbackRequestId) return Promise.reject(new Error('Playback superseded'));
-        v.muted = false;
-        return v.play();
-      }).then(() => {
+      v.muted = false;
+      v.play().then(() => {
         if (p) p.src = 'images/pause.png';
         if (volBtn) volBtn.src = 'images/volume-up.png';
       }).catch(() => {
-        if (requestId !== playbackRequestId) return;
         v.muted = true;
         if (volBtn) volBtn.src = 'images/mute.png';
         v.play().catch(() => {});
@@ -197,79 +175,9 @@ function playShortAt(index) {
       });
     } else {
       v.pause();
-      const isPrefetchCandidate = i > index && i <= index + PREFETCH_COUNT;
-      if (!isPrefetchCandidate) unloadShortVideo(v);
       if (p) p.src = 'images/play-button-arrowhead.png';
     }
   });
-
-  loadPromise.then(() => scheduleShortPrefetch(index, requestId)).catch(() => {});
-}
-
-function loadShortVideo(video) {
-  if (video.dataset.loaded === 'true') {
-    return shortLoadPromises.get(video) || Promise.resolve();
-  }
-
-  const source = video.dataset.videoSrc;
-  if (!source) return Promise.reject(new Error('Short has no video source'));
-
-  video.dataset.loaded = 'true';
-  video.preload = 'auto';
-  video.src = source;
-  video.load();
-
-  const loadPromise = new Promise((resolve, reject) => {
-    const cleanup = () => {
-      video.removeEventListener('canplay', handleCanPlay);
-      video.removeEventListener('error', handleError);
-    };
-    const handleCanPlay = () => {
-      cleanup();
-      resolve();
-    };
-    const handleError = () => {
-      cleanup();
-      video.dataset.loaded = 'false';
-      shortLoadPromises.delete(video);
-      reject(new Error('Short video failed to load'));
-    };
-
-    video.addEventListener('canplay', handleCanPlay, { once: true });
-    video.addEventListener('error', handleError, { once: true });
-    if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) handleCanPlay();
-  });
-
-  shortLoadPromises.set(video, loadPromise);
-  return loadPromise;
-}
-
-function scheduleShortPrefetch(index, requestId) {
-  const schedule = typeof window.requestIdleCallback === 'function'
-    ? window.requestIdleCallback.bind(window)
-    : (callback) => window.setTimeout(callback, 250);
-  schedule(() => {
-    if (requestId !== playbackRequestId) return;
-
-    const containers = document.querySelectorAll('.shorts-video-container');
-    const nextVideos = Array.from({ length: PREFETCH_COUNT }, (_, offset) => {
-      return containers[index + offset + 1]?.querySelector('.shorts-video');
-    }).filter(Boolean);
-
-    nextVideos.reduce((promise, video) => promise.then(() => {
-      if (requestId !== playbackRequestId) return;
-      return loadShortVideo(video).catch(() => {});
-    }), Promise.resolve());
-  }, { timeout: 1000 });
-}
-
-function unloadShortVideo(video) {
-  if (video.dataset.loaded !== 'true') return;
-  video.pause();
-  video.removeAttribute('src');
-  video.load();
-  video.dataset.loaded = 'false';
-  video.preload = 'none';
 }
 
 async function recordShortView(container, shortId) {
@@ -307,7 +215,6 @@ function initShortsInteractions() {
     const video = container.querySelector('.shorts-video');
     const playBtn = container.querySelector('.js-play');
     const volumeBtn = container.querySelector('.js-volume');
-    const loadingIndicator = container.querySelector('.shorts-loading-indicator');
     let isMuted = false;
 
     if (!video) return;
@@ -315,18 +222,16 @@ function initShortsInteractions() {
     video.muted = isMuted;
     if (volumeBtn) volumeBtn.src = isMuted ? 'images/mute.png' : 'images/volume-up.png';
 
-    const setLoadingState = (isLoading) => {
-      if (!loadingIndicator) return;
-      loadingIndicator.classList.toggle('is-visible', isLoading);
-      loadingIndicator.setAttribute('aria-hidden', String(!isLoading));
-    };
-
-    video.addEventListener('loadstart', () => setLoadingState(true));
-    video.addEventListener('waiting', () => setLoadingState(true));
-    video.addEventListener('stalled', () => setLoadingState(true));
-    video.addEventListener('canplay', () => setLoadingState(false));
-    video.addEventListener('playing', () => setLoadingState(false));
-    video.addEventListener('error', () => setLoadingState(false));
+    if (index === 0) {
+      video.play().then(() => {
+        if (playBtn) playBtn.src = 'images/pause.png';
+      }).catch(() => {
+        video.muted = true;
+        if (volumeBtn) volumeBtn.src = 'images/mute.png';
+        video.play().catch(() => {});
+        if (playBtn) playBtn.src = 'images/pause.png';
+      });
+    }
 
     if (playBtn) {
       playBtn.addEventListener('click', () => {
@@ -508,9 +413,6 @@ async function loadCommentCounts(shorts) {
 let currentIndex = 0;
 let shortsFeed = [];
 let suppressNextShortTap = false;
-let playbackRequestId = 0;
-const shortLoadPromises = new WeakMap();
-const PREFETCH_COUNT = 2;
 const SHORTS_VIEW_SECONDS = 3;
 
 function formatShortViews(value) {
