@@ -266,35 +266,6 @@ body {
   width: fit-content;
 }
 
-.shorts-loading-indicator {
-  position: absolute;
-  inset: 0;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  z-index: 8;
-  pointer-events: none;
-}
-
-.shorts-loading-indicator.is-visible {
-  display: flex;
-}
-
-.shorts-loading-spinner {
-  width: 38px;
-  height: 38px;
-  border: 4px solid rgba(255, 255, 255, 0.35);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: shorts-spinner-rotation 0.8s linear infinite;
-}
-
-@keyframes shorts-spinner-rotation {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* Description positioned inside bottom of video */
 .shorts-video-description-container {
   position: absolute;
